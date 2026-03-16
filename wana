@@ -148,9 +148,7 @@ if [ $# -ne 0 ]; then
 
             #parse uri from action
             if [ "$action" != "-" ]; then
-                IFS=" " read -r ignore uri ignore <<__END3__
-$action
-__END3__
+                uri=$(printf "%s" "$action" | awk '{print $2}')
             else 
                 uri=""
             fi
@@ -183,7 +181,7 @@ __END2__
             date="$year-$month-$day $hours:$mins:$secs"
 
 
-            #get uri from action
+            #check if uri matches any regexes
             if [ -n "$uris" ]; then
                 set -- "$uris"
                 while [ $# -gt 0 ]; do
@@ -257,21 +255,26 @@ __END2__
 
         shift
     done | {
-            if [ "$comm" = "hist-ip" ] || [ "$comm" = "hist-load" ]; then
+            if [ "$comm" = "hist-ip" ]; then
+                awk '{ count[$0]++ } END {for (x in count) {
+                    printf "%s (%d): ", x, count[x]
+                    for (i=0; i<count[x]; i++) printf "#"
+                    printf "\n"
+                    } 
+                }' | sort -t '(' -k2,2nr
+            elif [ "$comm" = "hist-load" ]; then
                 awk '{ count[$0]++ } END {for (x in count) {
                     printf "%s (%d): ", x, count[x]
                     for (i=0; i<count[x]; i++) printf "#"
                     printf "\n"
                     } 
                 }' | sort
-            else
+            elif [ -n "$comm" ]; then
                 awk '!seen[$0]++ {print $0}'
+            else
+                awk '{print}'
             fi
         }
 
 
 fi
-
-##############
-# IFS -> split apart -> validate all 
-# awk -F 
