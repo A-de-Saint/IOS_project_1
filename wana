@@ -151,15 +151,18 @@ if [ $# -ne 0 ]; then
 
         #apply filters
         $printer "$1" | while IFS= read -r line ; do
-            #get ip, date, and action (= GET /website HTTP...)
+            #get ip, date, and method (= GET /website HTTP...)
             set -- $line
             ip="$1"
             date="$4"
-            action=$(printf "%s" "$line" | awk -F'"' '{print $2}')
+            #the only way I found for acquiring method was a here document
+            IFS=\" read -r ignore method ignore <<__END1__
+$line
+__END1__
 
-            #parse uri from $action
-            if [ "$action" != "-" ]; then
-                set -- $action
+            #parse uri from $method
+            if [ "$method" != "-" ]; then
+                set -- $method
                 uri="$2"
             else 
                 uri=""
@@ -206,9 +209,10 @@ __END2__
 
             #check if ip is included in ips
             if [ -n "$ips" ]; then
-                if ! printf "%s" "$ips" | grep " $ip " >/dev/null ; then
-                    continue
-                fi
+                case "$ips" in
+                    *" $ip "*) ;;
+                    *) continue ;;
+                esac
             fi
 
             #check if uri matches any regexes
@@ -222,19 +226,22 @@ __END2__
                     shift
                 done
                 if [ ! -n "$sat" ]; then
-                    sat="" #reset sat
                     continue
                 fi
+                sat="" #reset sat
             fi
 
             # print what is to be printed
             if [ -n "$comm" ]; then
                 #unique ips for list-ip
                 if [ "$comm" = "list-ip" ]; then
-                    if ! printf "%s" "$contained" | grep " $ip " >/dev/null ; then
-                        printf "%s\n" "$ip"
-                        contained="$contained $ip "
-                    fi
+                    case "$contained" in
+                        *" $ip "*) ;;
+                        *) 
+                            printf "%s\n" "$ip" 
+                            contained="$contained $ip "
+                            ;;
+                    esac
                 #unique domain names for list-hosts
                 elif [ "$comm" = "list-hosts" ]; then
                     if host "$ip" >/dev/null ; then
