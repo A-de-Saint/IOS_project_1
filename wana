@@ -29,79 +29,84 @@ check_ip() {
     return 1
 }
 
-# parsing FORMAT
+# parsing FILTER
 while [ $# -gt 0 ]; do
-    if [ "$1" = "-a" ]; then
-        shift
-        if [ $# -eq 0 ]; then
-            echo "Missing date after -a"
-            exit 1
-        fi
-        if check_date "$1"; then
-            if [ -n "$after" ]; then
-                if [ "$1" \> "$after" ]; then
+    case "$1" in
+        -a)
+            shift
+            if [ $# -eq 0 ]; then
+                echo "Missing date after -a"
+                exit 1
+            fi
+            if check_date "$1"; then
+                if [ -n "$after" ]; then
+                    if [ "$1" \> "$after" ]; then
+                        after="$1"
+                    fi
+                else
                     after="$1"
                 fi
             else
-                after="$1"
+                echo "Invalid date format: $1"
+                exit 1
             fi
-        else
-            echo "Invalid date format: $1"
-            exit 1
-        fi
-    elif [ "$1" = '-b' ]; then
-        shift
-        if [ $# -eq 0 ]; then
-            echo "Missing date after -b"
-            exit 1
-        fi
-        if check_date "$1"; then
-            if [ -n "$before" ]; then
-                if [ "$1" \< "$before" ]; then
+            ;;
+        -b)
+            shift
+            if [ $# -eq 0 ]; then
+                echo "Missing date after -b"
+                exit 1
+            fi
+            if check_date "$1"; then
+                if [ -n "$before" ]; then
+                    if [ "$1" \< "$before" ]; then
+                        before="$1"
+                    fi
+                else
                     before="$1"
                 fi
             else
-                before="$1"
+                echo "Invalid date format: $1"
+                exit 1
             fi
-        else
-            echo "Invalid date format: $1"
-            exit 1
-        fi
-    elif [ "$1" = "-ip" ]; then
-        shift
-        if [ $# -eq 0 ]; then
-            echo "Missing ip address after -ip"
-            exit 1
-        fi
-        if check_ip "$1"; then
-            if [ -n "$ips" ]; then
-                ips="$ips $1 "
+            ;;
+        -ip)
+            shift
+            if [ $# -eq 0 ]; then
+                echo "Missing ip address after -ip"
+                exit 1
+            fi
+            if check_ip "$1"; then
+                if [ -n "$ips" ]; then
+                    ips="$ips $1 "
+                else
+                    ips=" $1 "
+                fi
             else
-                ips=" $1 "
+                echo "Invalid ip format: $1"
+                exit 1
             fi
-        else
-            echo "Invalid ip format: $1"
-            exit 1
-        fi
-    elif [ "$1" = "-uri" ]; then
-        shift
-        if [ $# -eq 0 ]; then
-            echo "Missing URI regex after -uri"
-            exit 1
-        fi
-        if [ -n "$uris" ]; then
-            uris="$uris $1"
-        else
-            uris="$1"
-        fi
-    else
-        break
-    fi
-
+            ;;
+        -uri)
+            shift
+            if [ $# -eq 0 ]; then
+                echo "Missing URI regex after -uri"
+                exit 1
+            fi
+            if [ -n "$uris" ]; then
+                uris="$uris $1 "
+            else
+                uris=" $1 "
+            fi
+            ;;
+        *)
+            break ;;
+    esac
     shift
 done
 
 # parsing COMMAND
+#accepts at most one command, saves it to $comm
 if [ $# -gt 0 ]; then
     case "$1" in
         list-ip)
@@ -129,24 +134,30 @@ if [ $# -gt 0 ]; then
 fi
 
 # reading from logs
+#while there are logs, print what is desired and filter using awk
+#while (logs) | cat/zcat [LOG] | while (filter) | awk (for histograms)
 if [ $# -ne 0 ]; then
     while [ $# -ne 0 ]; do
         if [ ! -f "$1" ]; then
             echo "$1 is not a file"
             exit 1
         fi
+
+        #determine whether to use cat or zcat
         if printf "%s\n" "$1" | grep "^.*\.gz$" >/dev/null ; then
             printer=zcat
         else 
             printer=cat
         fi
 
+        #apply filters
         $printer "$1" | while IFS= read -r line ; do
+            #get ip, date, and action (= GET /website HTTP...)
             ip=$(printf "%s" "$line" | awk '{print $1}')
             date=$(printf "%s" "$line" | awk '{print $4}')
             action=$(printf "%s" "$line" | awk -F'"' '{print $2}')
 
-            #parse uri from action
+            #parse uri from $action
             if [ "$action" != "-" ]; then
                 uri=$(printf "%s" "$action" | awk '{print $2}')
             else 
@@ -180,22 +191,6 @@ __END2__
             #finally, the date format I want
             date="$year-$month-$day $hours:$mins:$secs"
 
-
-            #check if uri matches any regexes
-            if [ -n "$uris" ]; then
-                set -- "$uris"
-                while [ $# -gt 0 ]; do
-                    if printf "%s" "$uri" | grep "$1" >/dev/null ; then
-                        sat=1
-                        break
-                    fi
-                    shift
-                done
-                if [ ! -n "$sat" ]; then
-                    continue
-                fi
-            fi
-
             #skip undesired dates
             if [ -n "$after" ]; then
                 if [ ! "$after" \< "$date" ]; then
@@ -215,13 +210,30 @@ __END2__
                 fi
             fi
 
+            #check if uri matches any regexes
+            if [ -n "$uris" ]; then
+                set -- "$uris"
+                while [ $# -gt 0 ]; do
+                    if printf "%s" "$uri" | grep "$1" >/dev/null ; then
+                        sat=1
+                        break
+                    fi
+                    shift
+                done
+                if [ ! -n "$sat" ]; then
+                    continue
+                fi
+            fi
+
             # print what is to be printed
             if [ -n "$comm" ]; then
+                #unique ips for list-ip
                 if [ "$comm" = "list-ip" ]; then
                     if ! printf "%s" "$contained" | grep " $ip " >/dev/null ; then
                         printf "%s\n" "$ip"
                         contained="$contained $ip "
                     fi
+                #unique domain names for list-hosts
                 elif [ "$comm" = "list-hosts" ]; then
                     if host "$ip" >/dev/null ; then
                         dn=$(host "$ip" | awk '{print $NF}' | sed 's/\.$//')
@@ -235,6 +247,7 @@ __END2__
                             contained="$contained $ip "
                         fi
                     fi
+                #unique uris that passed the regexes for list-uri
                 elif [ "$comm" = "list-uri" ]; then
                     if [ -n "$uri" ]; then
                         if ! printf "%s" "$contained" | grep " $uri " >/dev/null ; then
@@ -242,39 +255,43 @@ __END2__
                             contained="$contained $uri "
                         fi
                     fi
+                #ips for hist-ip
                 elif [ "$comm" = "hist-ip" ]; then
                     printf "%s\n" "$ip"
+                #dates for hist-load (minutes and seconds trimmed)
                 elif [ "$comm" = "hist-load" ]; then
                     printf "%s-%s-%s %s:%s\n" "$year" "$month" "$day" "$hours" "00"
                 fi
+            #if no commands, just rewrite the log
             else
                 printf "%s\n" "$line"
             fi
 
         done
-
-        shift
+        shift #repeat for another possible log
     done | {
-            if [ "$comm" = "hist-ip" ]; then
-                awk '{ count[$0]++ } END {for (x in count) {
-                    printf "%s (%d): ", x, count[x]
-                    for (i=0; i<count[x]; i++) printf "#"
-                    printf "\n"
-                    } 
-                }' | sort -t '(' -k2,2nr
-            elif [ "$comm" = "hist-load" ]; then
-                awk '{ count[$0]++ } END {for (x in count) {
-                    printf "%s (%d): ", x, count[x]
-                    for (i=0; i<count[x]; i++) printf "#"
-                    printf "\n"
-                    } 
-                }' | sort
-            elif [ -n "$comm" ]; then
-                awk '!seen[$0]++ {print $0}'
-            else
-                awk '{print}'
-            fi
-        }
-
-
+        #hist-ip sorted by count of ips
+        if [ "$comm" = "hist-ip" ]; then
+            awk '{ count[$0]++ } END {for (x in count) {
+                printf "%s (%d): ", x, count[x]
+                for (i=0; i<count[x]; i++) printf "#"
+                printf "\n"
+                } 
+            }' | sort -t '(' -k2,2nr
+        #hist-load sorted by time (just string sort)
+        elif [ "$comm" = "hist-load" ]; then
+            awk '{ count[$0]++ } END {for (x in count) {
+                printf "%s (%d): ", x, count[x]
+                for (i=0; i<count[x]; i++) printf "#"
+                printf "\n"
+                } 
+            }' | sort
+        #for any list- command, unique only
+        elif [ -n "$comm" ]; then
+            awk '!seen[$0]++ {print $0}'
+        #else just rewrite
+        else
+            awk '{print}'
+        fi
+    }
 fi
