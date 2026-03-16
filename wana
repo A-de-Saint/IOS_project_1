@@ -1,0 +1,262 @@
+#!/bin/sh
+
+#checks date for validity (format and existing dates)
+check_date() {
+    if [ $# -ne 0 ]; then
+        #check format YYYY-MM-DD HH:MM:SS
+        case "$1" in
+            [0-9][0-9][0-9][0-9]-[0-1][0-9]-[0-3][0-9]\ [0-2][0-9]:[0-5][0-9]:[0-5][0-9]) return 0;;
+            *)
+                return 1;;
+        esac
+    fi
+    return 1
+}
+
+check_ip() {
+    #these checks have their flaws -> for example 1:::1 could pass, but this is the best I can do that is reasonable in a script
+    if [ $# -ne 0 ]; then          # (1-3digs)(3*(.1-3digs)) -> xxx.xxx.xxx.xxx
+        if printf "%s" "$1" | grep '^[0-9]\{1,3\}\(\.[0-9]\{1,3\}\)\{3\}$' >/dev/null ; then #ipv4
+            return 0
+        fi                         # (7*(1-4HEXdigits:))(1-4HEXdigits) -> XXXX:XXXX:...:XXXX
+        if printf "%s" "$1" | grep '^\([0-9A-Fa-f]\{1,4\}:\)\{7\}[0-9A-Fa-f]\{1,4\}$' >/dev/null ; then #ipv6 normal
+            return 0
+        fi                         # ((0-7) * ((1-4) HEX digits):))(1-2) * (:)(((1-6) * (1-4) HEX digits):)(1-4) HEX digits -> XXXX::XXXX or even ::XXXX
+        if printf "%s" "$1" | grep '^\([0-9A-Fa-f]\{1,4\}:\)\{0,7\}:\{1,2\}\([0-9A-Fa-f]\{1,4\}:\)\{0,6\}[0-9A-Fa-f]\{1,4\}$' >/dev/null ; then #ipv6 compressed
+            return 0
+        fi
+    fi
+    return 1
+}
+
+# parsing FORMAT
+while [ $# -gt 0 ]; do
+    if [ "$1" = "-a" ]; then
+        shift
+        if [ $# -eq 0 ]; then
+            echo "Missing date after -a"
+            exit 1
+        fi
+        if check_date "$1"; then
+            if [ -n "$after" ]; then
+                if [ "$1" \> "$after" ]; then
+                    after="$1"
+                fi
+            else
+                after="$1"
+            fi
+        else
+            echo "Invalid date format: $1"
+            exit 1
+        fi
+    elif [ "$1" = '-b' ]; then
+        shift
+        if [ $# -eq 0 ]; then
+            echo "Missing date after -b"
+            exit 1
+        fi
+        if check_date "$1"; then
+            if [ -n "$before" ]; then
+                if [ "$1" \< "$before" ]; then
+                    before="$1"
+                fi
+            else
+                before="$1"
+            fi
+        else
+            echo "Invalid date format: $1"
+            exit 1
+        fi
+    elif [ "$1" = "-ip" ]; then
+        shift
+        if [ $# -eq 0 ]; then
+            echo "Missing ip address after -ip"
+            exit 1
+        fi
+        if check_ip "$1"; then
+            if [ -n "$ips" ]; then
+                ips="$ips $1 "
+            else
+                ips=" $1 "
+            fi
+        else
+            echo "Invalid ip format: $1"
+            exit 1
+        fi
+    elif [ "$1" = "-uri" ]; then
+        shift
+        if [ $# -eq 0 ]; then
+            echo "Missing URI regex after -uri"
+            exit 1
+        fi
+        if [ -n "$uris" ]; then
+            uris="$uris $1"
+        else
+            uris="$1"
+        fi
+    else
+        break
+    fi
+
+    shift
+done
+
+# parsing COMMAND
+if [ $# -gt 0 ]; then
+    case "$1" in
+        list-ip)
+            comm="$1"
+            shift
+            ;;
+        list-hosts)
+            comm="$1"
+            shift
+            ;;
+        list-uri)
+            comm="$1"
+            shift
+            ;;
+        hist-ip)
+            comm="$1"
+            shift
+            ;;
+        hist-load)
+            comm="$1"
+            shift
+            ;;
+        *) ;;
+    esac
+fi
+
+# reading from logs
+if [ $# -ne 0 ]; then
+    while [ $# -ne 0 ]; do
+        if [ ! -f "$1" ]; then
+            echo "$1 is not a file"
+            exit 1
+        fi
+        if printf "%s" "$1" | grep "^*.gz$" >/dev/null ; then
+            printer=zcat
+        else 
+            printer=cat
+        fi
+
+        $printer "$1" | while IFS= read -r line ; do
+            ip=$(printf "%s" "$line" | awk '{print $1}')
+            date=$(printf "%s" "$line" | awk '{print $4}')
+            action=$(printf "%s" "$line" | awk -F'"' '{print $2}')
+
+            #parse uri from action
+            if [ "$action" != "-" ]; then
+                IFS=" " read -r ignore uri ignore <<__END3__
+$action
+__END3__
+            else 
+                uri=""
+            fi
+
+            # convert date
+            # remove brackets
+            date=${date#\[}
+            date=${date%\]*} 
+            #parse using here-document (nothing else worked)
+            IFS='/:' read -r day month year hours mins secs ignore <<__END2__
+$date
+__END2__
+            #convert month to number
+            case "$month" in
+                Jan) month=01 ;;
+                Feb) month=02 ;;
+                Mar) month=03 ;;
+                Apr) month=04 ;;
+                May) month=05 ;;
+                Jun) month=06 ;;
+                Jul) month=07 ;;
+                Aug) month=08 ;;
+                Sep) month=09 ;;
+                Oct) month=10 ;;
+                Nov) month=11 ;;
+                Dec) month=12 ;;
+            esac
+
+            #finally, the date format I want
+            date="$year-$month-$day $hours:$mins:$secs"
+
+
+            #get uri from action
+            if [ -n "$uris" ]; then
+                set -- "$uris"
+                while [ $# -gt 0 ]; do
+                    if printf "%s" "$uri" | grep "$1" >/dev/null ; then
+                        sat=1
+                        break
+                    fi
+                    shift
+                done
+                if [ ! -n "$sat" ]; then
+                    continue
+                fi
+            fi
+
+            #skip undesired dates
+            if [ -n "$after" ]; then
+                if [ ! "$after" \< "$date" ]; then
+                    continue
+                fi
+            fi
+            if [ -n "$before" ]; then
+                if [ ! "$before" \> "$date" ]; then
+                    continue
+                fi
+            fi
+
+            #check if ip is included in ips
+            if [ -n "$ips" ]; then
+                if ! printf "%s" "$ips" | grep " $ip " >/dev/null ; then
+                    continue
+                fi
+            fi
+
+            # print what is to be printed
+            if [ -n "$comm" ]; then
+                if [ "$comm" = "list-ip" ]; then
+                    if ! printf "%s" "$contained" | grep " $ip " >/dev/null ; then
+                        printf "%s\n" "$ip"
+                        contained="$contained $ip "
+                    fi
+                elif [ "$comm" = "list-hosts" ]; then
+                    if host "$ip" >/dev/null ; then
+                        dn=$(host "$ip" | awk '{print $NF}' | sed 's/\.$//')
+                        if ! printf "%s" "$contained" | grep " $dn " >/dev/null ; then
+                            printf "%s\n" "$dn"
+                            contained="$contained $dn "
+                        fi
+                    else
+                        if ! printf "%s" "$contained" | grep " $ip " >/dev/null ; then
+                            printf "%s\n" "$ip"
+                            contained="$contained $ip "
+                        fi
+                    fi
+                elif [ "$comm" = "list-uri" ]; then
+                    if [ -n "$uri" ]; then
+                        if ! printf "%s" "$contained" | grep " $uri " >/dev/null ; then
+                            printf "%s\n" "$uri"
+                            contained="$contained $uri "
+                        fi
+                    fi
+                fi
+            else
+                printf "%s\n" "$line"
+            fi
+
+        done
+
+        shift
+    done
+
+
+fi
+
+##############
+# IFS -> split apart -> validate all 
+# awk -F 
