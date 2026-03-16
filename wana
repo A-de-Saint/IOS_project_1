@@ -133,174 +133,188 @@ if [ $# -gt 0 ]; then
     esac
 fi
 
+#if no [LOG] arguments, read from stdin
+if [ $# -eq 0 ]; then
+    stdin=1
+fi
+
 # reading from logs
 #while there are logs, print what is desired and filter using awk
 #while (logs) | cat/zcat [LOG] | while (filter) | awk (for histograms)
-if [ $# -ne 0 ]; then
-    while [ $# -ne 0 ]; do
+while [ $# -ne 0 ] || [ -n "$stdin" ]; do
+
+    #get input (either log or stdin)
+    if [ -n "$stdin" ]; then
+        input=$(cat)
+    else
         if [ ! -f "$1" ]; then
             echo "$1 is not a file"
             exit 1
         fi
-
-        #determine whether to use cat or zcat
+         #determine whether to use cat or zcat
         case "$1" in
             *.gz) printer=zcat ;;
             *) printer=cat ;;
         esac
+        input=$($printer "$1")
+    fi
 
-        #apply filters
-        $printer "$1" | while IFS= read -r line ; do
-            #get ip, date, and method (= GET /website HTTP...)
-            set -- $line
-            ip="$1"
-            date="$4"
-            #the only way I found for acquiring method was a here document
-            IFS=\" read -r ignore method ignore <<__END1__
+    #apply filters
+    printf "%s" "$input" | while IFS= read -r line ; do
+        #get ip, date, and method (= GET /website HTTP...)
+        set -- $line
+        ip="$1"
+        date="$4"
+        #the only way I found for acquiring method was a here document
+        IFS=\" read -r ignore method ignore <<__END1__
 $line
 __END1__
 
-            #parse uri from $method
-            if [ "$method" != "-" ]; then
-                set -- $method
-                uri="$2"
-            else 
-                uri=""
-            fi
+        #parse uri from $method
+        if [ "$method" != "-" ]; then
+            set -- $method
+            uri="$2"
+        else 
+            uri=""
+        fi
 
-            # convert date
-            # remove brackets
-            date=${date#\[}
-            date=${date%\]*} 
-            #parse using here-document (nothing else worked)
-            IFS='/:' read -r day month year hours mins secs ignore <<__END2__
+        # convert date
+        # remove brackets
+        date=${date#\[}
+        date=${date%\]*} 
+        #parse using here-document (nothing else worked)
+        IFS='/:' read -r day month year hours mins secs ignore <<__END2__
 $date
 __END2__
-            #convert month to number
-            case "$month" in
-                Jan) month=01 ;;
-                Feb) month=02 ;;
-                Mar) month=03 ;;
-                Apr) month=04 ;;
-                May) month=05 ;;
-                Jun) month=06 ;;
-                Jul) month=07 ;;
-                Aug) month=08 ;;
-                Sep) month=09 ;;
-                Oct) month=10 ;;
-                Nov) month=11 ;;
-                Dec) month=12 ;;
-            esac
+        #convert month to number
+        case "$month" in
+            Jan) month=01 ;;
+            Feb) month=02 ;;
+            Mar) month=03 ;;
+            Apr) month=04 ;;
+            May) month=05 ;;
+            Jun) month=06 ;;
+            Jul) month=07 ;;
+            Aug) month=08 ;;
+            Sep) month=09 ;;
+            Oct) month=10 ;;
+            Nov) month=11 ;;
+            Dec) month=12 ;;
+        esac
 
-            #finally, the date format I want
-            date="$year-$month-$day $hours:$mins:$secs"
+        #finally, the date format I want
+        date="$year-$month-$day $hours:$mins:$secs"
 
-            #skip undesired dates
-            if [ -n "$after" ]; then
-                if [ ! "$after" \< "$date" ]; then
-                    continue
-                fi
+        #skip undesired dates
+        if [ -n "$after" ]; then
+            if [ ! "$after" \< "$date" ]; then
+                continue
             fi
-            if [ -n "$before" ]; then
-                if [ ! "$before" \> "$date" ]; then
-                    continue
-                fi
-            fi
-
-            #check if ip is included in ips
-            if [ -n "$ips" ]; then
-                case "$ips" in
-                    *" $ip "*) ;;
-                    *) continue ;;
-                esac
-            fi
-
-            #check if uri matches any regexes
-            if [ -n "$uris" ]; then
-                set -- $uris
-                while [ $# -gt 0 ]; do
-                    if printf "%s" "$uri" | grep "$1" >/dev/null ; then
-                        sat=1
-                        break
-                    fi
-                    shift
-                done
-                if [ ! -n "$sat" ]; then
-                    continue
-                fi
-                sat="" #reset sat
-            fi
-
-            # print what is to be printed
-            if [ -n "$comm" ]; then
-                #unique ips for list-ip
-                if [ "$comm" = "list-ip" ]; then
-                    case "$contained" in
-                        *" $ip "*) ;;
-                        *) 
-                            printf "%s\n" "$ip" 
-                            contained="$contained $ip "
-                            ;;
-                    esac
-                #unique domain names for list-hosts
-                elif [ "$comm" = "list-hosts" ]; then
-                    if host "$ip" >/dev/null ; then
-                        dn=$(host "$ip" | awk '{print $NF}' | sed 's/\.$//')
-                        if ! printf "%s" "$contained" | grep " $dn " >/dev/null ; then
-                            printf "%s\n" "$dn"
-                            contained="$contained $dn "
-                        fi
-                    else
-                        if ! printf "%s" "$contained" | grep " $ip " >/dev/null ; then
-                            printf "%s\n" "$ip"
-                            contained="$contained $ip "
-                        fi
-                    fi
-                #unique uris that passed the regexes for list-uri
-                elif [ "$comm" = "list-uri" ]; then
-                    if [ -n "$uri" ]; then
-                        if ! printf "%s" "$contained" | grep " $uri " >/dev/null ; then
-                            printf "%s\n" "$uri"
-                            contained="$contained $uri "
-                        fi
-                    fi
-                #ips for hist-ip
-                elif [ "$comm" = "hist-ip" ]; then
-                    printf "%s\n" "$ip"
-                #dates for hist-load (minutes and seconds trimmed)
-                elif [ "$comm" = "hist-load" ]; then
-                    printf "%s-%s-%s %s:%s\n" "$year" "$month" "$day" "$hours" "00"
-                fi
-            #if no commands, just rewrite the log
-            else
-                printf "%s\n" "$line"
-            fi
-
-        done
-        shift #repeat for another possible log
-    done | {
-        #hist-ip sorted by count of ips
-        if [ "$comm" = "hist-ip" ]; then
-            awk '{ count[$0]++ } END {for (x in count) {
-                printf "%s (%d): ", x, count[x]
-                for (i=0; i<count[x]; i++) printf "#"
-                printf "\n"
-                } 
-            }' | sort -t '(' -k2,2nr
-        #hist-load sorted by time (just string sort)
-        elif [ "$comm" = "hist-load" ]; then
-            awk '{ count[$0]++ } END {for (x in count) {
-                printf "%s (%d): ", x, count[x]
-                for (i=0; i<count[x]; i++) printf "#"
-                printf "\n"
-                } 
-            }' | sort
-        #for any list- command, unique only
-        elif [ -n "$comm" ]; then
-            awk '!seen[$0]++ {print $0}'
-        #else just rewrite
-        else
-            awk '{print}'
         fi
-    }
-fi
+        if [ -n "$before" ]; then
+            if [ ! "$before" \> "$date" ]; then
+                continue
+            fi
+        fi
+
+        #check if ip is included in ips
+        if [ -n "$ips" ]; then
+            case "$ips" in
+                *" $ip "*) ;;
+                *) continue ;;
+            esac
+        fi
+
+        #check if uri matches any regexes
+        if [ -n "$uris" ]; then
+            set -- $uris
+            while [ $# -gt 0 ]; do
+                if printf "%s" "$uri" | grep "$1" >/dev/null ; then
+                    sat=1
+                    break
+                fi
+                shift
+            done
+            if [ ! -n "$sat" ]; then
+                continue
+            fi
+            sat="" #reset sat
+        fi
+
+        # print what is to be printed
+        if [ -n "$comm" ]; then
+            #unique ips for list-ip
+            if [ "$comm" = "list-ip" ]; then
+                case "$contained" in
+                    *" $ip "*) ;;
+                    *) 
+                        printf "%s\n" "$ip" 
+                        contained="$contained $ip "
+                        ;;
+                esac
+            #unique domain names for list-hosts
+            elif [ "$comm" = "list-hosts" ]; then
+                if host "$ip" >/dev/null ; then
+                    dn=$(host "$ip" | awk '{print $NF}' | sed 's/\.$//')
+                    if ! printf "%s" "$contained" | grep " $dn " >/dev/null ; then
+                        printf "%s\n" "$dn"
+                        contained="$contained $dn "
+                    fi
+                else
+                    if ! printf "%s" "$contained" | grep " $ip " >/dev/null ; then
+                        printf "%s\n" "$ip"
+                        contained="$contained $ip "
+                    fi
+                fi
+            #unique uris that passed the regexes for list-uri
+            elif [ "$comm" = "list-uri" ]; then
+                if [ -n "$uri" ]; then
+                    if ! printf "%s" "$contained" | grep " $uri " >/dev/null ; then
+                        printf "%s\n" "$uri"
+                        contained="$contained $uri "
+                    fi
+                fi
+            #ips for hist-ip
+            elif [ "$comm" = "hist-ip" ]; then
+                printf "%s\n" "$ip"
+            #dates for hist-load (minutes and seconds trimmed)
+            elif [ "$comm" = "hist-load" ]; then
+                printf "%s-%s-%s %s:%s\n" "$year" "$month" "$day" "$hours" "00"
+            fi
+        #if no commands, just rewrite the log
+        else
+            printf "%s\n" "$line"
+        fi
+
+    done
+
+    if [ -n "$stdin" ]; then
+        break #ensures reading from stdin only once
+    else
+        shift #repeat for another possible log
+    fi
+done | {
+    #hist-ip sorted by count of ips
+    if [ "$comm" = "hist-ip" ]; then
+        awk '{ count[$0]++ } END {for (x in count) {
+            printf "%s (%d): ", x, count[x]
+            for (i=0; i<count[x]; i++) printf "#"
+            printf "\n"
+            } 
+        }' | sort -t '(' -k2,2nr
+    #hist-load sorted by time (just string sort)
+    elif [ "$comm" = "hist-load" ]; then
+        awk '{ count[$0]++ } END {for (x in count) {
+            printf "%s (%d): ", x, count[x]
+            for (i=0; i<count[x]; i++) printf "#"
+            printf "\n"
+            } 
+        }' | sort
+    #for any list- command, unique only
+    elif [ -n "$comm" ]; then
+        awk '!seen[$0]++ {print $0}'
+    #else just rewrite
+    else
+        awk '{print}'
+    fi
+}
