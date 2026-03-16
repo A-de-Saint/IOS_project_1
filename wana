@@ -94,9 +94,9 @@ while [ $# -gt 0 ]; do
                 exit 1
             fi
             if [ -n "$uris" ]; then
-                uris="$uris $1 "
+                uris="$uris $1"
             else
-                uris=" $1 "
+                uris="$1"
             fi
             ;;
         *)
@@ -144,22 +144,23 @@ if [ $# -ne 0 ]; then
         fi
 
         #determine whether to use cat or zcat
-        if printf "%s\n" "$1" | grep "^.*\.gz$" >/dev/null ; then
-            printer=zcat
-        else 
-            printer=cat
-        fi
+        case "$1" in
+            *.gz) printer=zcat ;;
+            *) printer=cat ;;
+        esac
 
         #apply filters
         $printer "$1" | while IFS= read -r line ; do
             #get ip, date, and action (= GET /website HTTP...)
-            ip=$(printf "%s" "$line" | awk '{print $1}')
-            date=$(printf "%s" "$line" | awk '{print $4}')
+            set -- $line
+            ip="$1"
+            date="$4"
             action=$(printf "%s" "$line" | awk -F'"' '{print $2}')
 
             #parse uri from $action
             if [ "$action" != "-" ]; then
-                uri=$(printf "%s" "$action" | awk '{print $2}')
+                set -- $action
+                uri="$2"
             else 
                 uri=""
             fi
@@ -212,7 +213,7 @@ __END2__
 
             #check if uri matches any regexes
             if [ -n "$uris" ]; then
-                set -- "$uris"
+                set -- $uris
                 while [ $# -gt 0 ]; do
                     if printf "%s" "$uri" | grep "$1" >/dev/null ; then
                         sat=1
@@ -221,6 +222,7 @@ __END2__
                     shift
                 done
                 if [ ! -n "$sat" ]; then
+                    sat="" #reset sat
                     continue
                 fi
             fi
