@@ -135,7 +135,7 @@ if [ $# -ne 0 ]; then
             echo "$1 is not a file"
             exit 1
         fi
-        if printf "%s" "$1" | grep "^*.gz$" >/dev/null ; then
+        if printf "%s\n" "$1" | grep "^.*\.gz$" >/dev/null ; then
             printer=zcat
         else 
             printer=cat
@@ -244,6 +244,10 @@ __END2__
                             contained="$contained $uri "
                         fi
                     fi
+                elif [ "$comm" = "hist-ip" ]; then
+                    printf "%s\n" "$ip"
+                elif [ "$comm" = "hist-load" ]; then
+                    printf "%s-%s-%s %s:%s\n" "$year" "$month" "$day" "$hours" "00"
                 fi
             else
                 printf "%s\n" "$line"
@@ -252,7 +256,18 @@ __END2__
         done
 
         shift
-    done
+    done | {
+            if [ "$comm" = "hist-ip" ] || [ "$comm" = "hist-load" ]; then
+                awk '{ count[$0]++ } END {for (x in count) {
+                    printf "%s (%d): ", x, count[x]
+                    for (i=0; i<count[x]; i++) printf "#"
+                    printf "\n"
+                    } 
+                }' | sort
+            else
+                awk '!seen[$0]++ {print $0}'
+            fi
+        }
 
 
 fi
