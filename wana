@@ -160,7 +160,7 @@ while [ $# -ne 0 ] || [ -n "$stdin" ]; do
     fi
 
     #apply filters
-    printf "%s" "$input" | while IFS= read -r line ; do
+    printf "%s\n" "$input" | while IFS= read -r line ; do
         #get ip, date, and method (= GET /website HTTP...)
         set -- $line
         ip="$1"
