@@ -151,20 +151,18 @@ fi
 #while (logs) | cat/zcat [LOG] | while (filter) | awk (for histograms)
 while [ $# -ne 0 ] || [ -n "$stdin" ]; do
 
-    #get input (either log or stdin)
-    if [ -n "$stdin" ]; then
-        input=$(cat)
-    else
-         #determine whether to use cat or zcat
-        case "$1" in
-            *.gz) printer=zcat ;;
-            *) printer=cat ;;
-        esac
-        input=$($printer "$1")
-    fi
-
-    #apply filters
-    printf "%s\n" "$input" | while IFS= read -r line ; do
+    #determine whether to use cat (stdin), cat file or zcat file; pipe to filtering while
+    {   if [ -n "$stdin" ]; then
+            cat
+        else
+            case "$1" in
+                *.gz)
+                    zcat "$1" ;;
+                *)
+                    cat "$1" ;;
+            esac
+        fi
+    } | while IFS= read -r line ; do
         #get ip, date, and method (= GET /website HTTP...)
         set -- $line
         ip="$1"
