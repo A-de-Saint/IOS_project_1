@@ -247,34 +247,19 @@ __END2__
         if [ -n "$comm" ]; then
             #unique ips for list-ip
             if [ "$comm" = "list-ip" ]; then
-                case "$contained" in
-                    *" $ip "*) ;;
-                    *) 
-                        printf "%s\n" "$ip" 
-                        contained="$contained $ip "
-                        ;;
-                esac
+                printf "%s\n" "$ip" 
             #unique domain names for list-hosts
             elif [ "$comm" = "list-hosts" ]; then
                 if host "$ip" >/dev/null ; then
                     dn=$(host "$ip" | awk '{print $NF}' | sed 's/\.$//')
-                    if ! printf "%s" "$contained" | grep " $dn " >/dev/null ; then
-                        printf "%s\n" "$dn"
-                        contained="$contained $dn "
-                    fi
+                    printf "%s\n" "$dn"
                 else
-                    if ! printf "%s" "$contained" | grep " $ip " >/dev/null ; then
-                        printf "%s\n" "$ip"
-                        contained="$contained $ip "
-                    fi
+                    printf "%s\n" "$ip"
                 fi
             #unique uris that passed the regexes for list-uri
             elif [ "$comm" = "list-uri" ]; then
                 if [ -n "$uri" ]; then
-                    if ! printf "%s" "$contained" | grep " $uri " >/dev/null ; then
-                        printf "%s\n" "$uri"
-                        contained="$contained $uri "
-                    fi
+                    printf "%s\n" "$uri"
                 fi
             #ips for hist-ip
             elif [ "$comm" = "hist-ip" ]; then
