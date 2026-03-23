@@ -136,6 +136,14 @@ fi
 #if no [LOG] arguments, read from stdin
 if [ $# -eq 0 ]; then
     stdin=1
+else
+    #check if all next arguments are files
+    for arg in "$@"; do
+        if [ ! -f "$arg" ]; then
+            echo "$arg is not a file"
+            exit 1
+        fi
+    done
 fi
 
 # reading from logs
@@ -147,10 +155,6 @@ while [ $# -ne 0 ] || [ -n "$stdin" ]; do
     if [ -n "$stdin" ]; then
         input=$(cat)
     else
-        if [ ! -f "$1" ]; then
-            echo "$1 is not a file"
-            exit 1
-        fi
          #determine whether to use cat or zcat
         case "$1" in
             *.gz) printer=zcat ;;
